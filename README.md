@@ -28,6 +28,71 @@ face_attendance/
 
 ---
 
+## 🐍 Create and Activate Virtual Environment
+
+It is recommended to use a virtual environment to avoid dependency conflicts.
+
+### Windows (PowerShell)
+
+```powershell
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Upgrade pip
+python -m pip install --upgrade pip
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Windows (Command Prompt)
+
+```cmd
+:: Create virtual environment
+python -m venv venv
+
+:: Activate virtual environment
+venv\Scripts\activate.bat
+
+:: Upgrade pip
+python -m pip install --upgrade pip
+
+:: Install dependencies
+pip install -r requirements.txt
+```
+
+### Linux / macOS
+
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Upgrade pip
+python -m pip install --upgrade pip
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Verify Installation
+
+```bash
+python --version
+pip --version
+```
+
+### Deactivate Virtual Environment
+
+```bash
+deactivate
+```
+
 ## ⚙️ Setup
 
 ```bash

@@ -1,0 +1,32 @@
+# Virtual environments
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Database
+attendance.db
+
+# Generated face encodings
+encodings.json
+
+# Reports and evaluation outputs
+reports/
+eval_results/
+eval_results_row1/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Environment variables
+.env

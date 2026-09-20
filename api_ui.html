@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attendance API Check</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17212b;
+      --muted: #687582;
+      --line: #dce4e8;
+      --paper: #ffffff;
+      --canvas: #f3f7f5;
+      --accent: #147d68;
+      --accent-dark: #0d5b4c;
+      --present: #16734f;
+      --absent: #a8543c;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(145deg, #e4f1eb, var(--canvas) 45%, #f8f4ea);
+      color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1040px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 60px; }
+    header { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 28px; }
+    h1, h2, p { margin-top: 0; }
+    h1 { margin-bottom: 6px; font-size: clamp(28px, 5vw, 44px); letter-spacing: -1px; line-height: 1.05; }
+    h2 { font-size: 18px; margin-bottom: 16px; }
+    .subtitle { color: var(--muted); margin-bottom: 0; }
+    .status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #c2ccd1; }
+    .dot.ok { background: var(--present); box-shadow: 0 0 0 5px #d9efe5; }
+    .dot.error { background: var(--absent); box-shadow: 0 0 0 5px #f5ddd7; }
+    .grid { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(0, 1.5fr); gap: 18px; }
+    section { background: rgba(255, 255, 255, .9); border: 1px solid var(--line); border-radius: 8px; padding: 22px; box-shadow: 0 14px 34px rgba(44, 70, 63, .07); }
+    .upload { border: 1px dashed #9fbab2; border-radius: 7px; padding: 18px; background: #f4faf7; }
+    input[type=file] { width: 100%; margin: 10px 0 14px; }
+    button { border: 0; border-radius: 5px; background: var(--accent); color: white; padding: 10px 14px; font: inherit; font-weight: 650; cursor: pointer; }
+    button:hover { background: var(--accent-dark); }
+    button:disabled { cursor: wait; opacity: .55; }
+    .secondary { background: #e5efeb; color: var(--accent-dark); }
+    .secondary:hover { background: #d5e7e0; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .message { min-height: 24px; color: var(--muted); margin: 14px 0 0; }
+    .message.error { color: var(--absent); }
+    .summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+    .metric { flex: 1 1 100px; padding: 12px 14px; background: #f5f8f7; border-left: 3px solid var(--accent); }
+    .metric strong { display: block; font-size: 22px; }
+    .metric span { color: var(--muted); font-size: 13px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 430px; }
+    th, td { text-align: left; padding: 11px 9px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .present { color: var(--present); font-weight: 700; }
+    .absent { color: var(--absent); font-weight: 700; }
+    .result { margin-top: 18px; }
+    .face { padding: 9px 0; border-bottom: 1px solid var(--line); }
+    .face:last-child { border-bottom: 0; }
+    .face small { display: block; color: var(--muted); }
+    @media (max-width: 720px) {
+      main { width: min(100% - 22px, 620px); padding-top: 26px; }
+      header { display: block; }
+      .status { margin-top: 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Attendance API</h1>
+        <p class="subtitle">Upload a classroom image and inspect today’s report.</p>
+      </div>
+      <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Checking API...</span></div>
+    </header>
+
+    <div class="grid">
+      <section>
+        <h2>Process an image</h2>
+        <div class="upload">
+          <label for="imageInput">Classroom picture</label>
+          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff">
+          <div class="actions">
+            <button id="processButton" type="button">Process attendance</button>
+            <button id="refreshButton" class="secondary" type="button">Refresh report</button>
+          </div>
+        </div>
+        <p id="message" class="message">Choose an image to begin.</p>
+        <div id="result" class="result"></div>
+      </section>
+
+      <section>
+        <h2>Today’s report <span id="reportDate"></span></h2>
+        <div id="summary" class="summary"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Student ID</th><th>Name</th><th>Time in</th><th>Status</th></tr></thead>
+            <tbody id="reportBody"><tr><td colspan="4">Loading report...</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    const $ = (id) => document.getElementById(id);
+
+    function showMessage(text, error = false) {
+      $("message").textContent = text;
+      $("message").className = error ? "message error" : "message";
+    }
+
+    async function request(path, options) {
+      const response = await fetch(API_BASE + path, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
+      return data;
+    }
+
+    function renderSummary(summary) {
+      $("summary").innerHTML = `
+        <div class="metric"><strong>${summary.present}</strong><span>Present</span></div>
+        <div class="metric"><strong>${summary.total}</strong><span>Total students</span></div>
+        <div class="metric"><strong>${summary.percentage}%</strong><span>Attendance</span></div>`;
+    }
+
+    function renderReport(data) {
+      const rows = data.attendance || [];
+      renderSummary(data.summary || { present: 0, total: 0, percentage: 0 });
+      $("reportDate").textContent = data.type === "date" && rows[0]?.date ? `(${rows[0].date})` : "";
+      $("reportBody").innerHTML = rows.length ? rows.map((row) => `
+        <tr><td>${row.student_id ?? ""}</td><td>${row.name ?? ""}</td>
+        <td>${row.time_in ?? "-"}</td><td class="${row.status === "Present" ? "present" : "absent"}">${row.status ?? "Absent"}</td></tr>`).join("")
+        : `<tr><td colspan="4">No students found.</td></tr>`;
+    }
+
+    async function refreshReport() {
+      try { renderReport(await request("/attendance/report")); }
+      catch (error) { $("reportBody").innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`; }
+    }
+
+    async function checkHealth() {
+      try {
+        await request("/health");
+        $("statusDot").className = "dot ok";
+        $("statusText").textContent = "API connected";
+        refreshReport();
+      } catch (error) {
+        $("statusDot").className = "dot error";
+        $("statusText").textContent = "API unavailable";
+        showMessage("Start the API with: python -m uvicorn api:app --reload", true);
+      }
+    }
+
+    $("processButton").addEventListener("click", async () => {
+      const file = $("imageInput").files[0];
+      if (!file) { showMessage("Select an image first.", true); return; }
+      const form = new FormData();
+      form.append("image", file);
+      $("processButton").disabled = true;
+      showMessage("Processing image...");
+      try {
+        const data = await request("/attendance/process", { method: "POST", body: form });
+        showMessage(`Processed ${data.faces.length} face(s). CSV: ${data.csv_file}`);
+        $("result").innerHTML = data.faces.length ? `<strong>Detected faces</strong>` + data.faces.map((face) =>
+          `<div class="face">${face.name} <small>${face.recognized ? `ID: ${face.student_id} | Confidence: ${face.confidence}%` : "Unknown face"}</small></div>`).join("") : "No faces detected.";
+        renderReport(data);
+      } catch (error) { showMessage(error.message, true); }
+      finally { $("processButton").disabled = false; }
+    });
+
+    $("refreshButton").addEventListener("click", refreshReport);
+    checkHealth();
+  </script>
+</body>
+</html>

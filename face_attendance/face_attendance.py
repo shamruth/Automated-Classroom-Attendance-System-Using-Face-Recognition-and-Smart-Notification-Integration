@@ -141,6 +141,137 @@ class AttendanceDB:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  Face Detection and Extraction Helpers (Hybrid HOG + Haar + Upsampling)
+# ══════════════════════════════════════════════════════════════════════════════
+_HAAR_CASCADE = None
+
+
+def get_haar_cascade() -> cv2.CascadeClassifier:
+    """Return a cached instance of the OpenCV Haar frontal face cascade."""
+    global _HAAR_CASCADE
+    if _HAAR_CASCADE is None:
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        _HAAR_CASCADE = cv2.CascadeClassifier(cascade_path)
+    return _HAAR_CASCADE
+
+
+def compute_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+    """Compute Intersection over Union between two (top, right, bottom, left) bounding boxes."""
+    top_a, right_a, bottom_a, left_a = box_a
+    top_b, right_b, bottom_b, left_b = box_b
+    dx = min(right_a, right_b) - max(left_a, left_b)
+    dy = min(bottom_a, bottom_b) - max(top_a, top_b)
+    if dx <= 0 or dy <= 0:
+        return 0.0
+    inter = dx * dy
+    area_a = max((right_a - left_a) * (bottom_a - top_a), 1)
+    area_b = max((right_b - left_b) * (bottom_b - top_b), 1)
+    return inter / float(area_a + area_b - inter)
+
+
+def find_all_face_locations(
+    rgb_img: np.ndarray,
+    model: str = "hog",
+    upsample: int = 1,
+    use_haar: bool = True,
+    bgr_img: Optional[np.ndarray] = None,
+) -> list[tuple[int, int, int, int]]:
+    """Detect all face locations using primary detector (HOG/CNN) plus Haar cascade complement.
+
+    This hybrid detection significantly increases detection rates for distant,
+    partially angled, or lower-contrast faces in classrooms.
+    """
+    # 1. Primary face_recognition detector
+    locations = list(face_recognition.face_locations(rgb_img, number_of_times_to_upsample=upsample, model=model))
+
+    # 2. Fast Haar Cascade complement
+    if use_haar:
+        if bgr_img is not None:
+            gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2GRAY)
+
+        cascade = get_haar_cascade()
+        haar_boxes = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=4,
+            minSize=(28, 28),
+        )
+
+        for (x, y, w, h) in haar_boxes:
+            haar_loc = (int(y), int(x + w), int(y + h), int(x))
+            # Merge: only add if not already detected by primary model
+            if not any(compute_iou(haar_loc, existing) > 0.35 for existing in locations):
+                locations.append(haar_loc)
+
+    return locations
+
+
+def extract_face_encodings(img_path: Path | str) -> list[np.ndarray]:
+    """Extract face encodings from an image using multi-stage fallbacks.
+
+    Pipeline:
+      1. Direct face_recognition.face_encodings
+      2. Upsample=2 with HOG
+      3. CLAHE contrast equalization + HOG
+      4. OpenCV Haar Cascade detector -> face_encodings
+    Ensures faces under difficult lighting, distance, or angles are successfully captured.
+    """
+    img = face_recognition.load_image_file(str(img_path))
+
+    # Stage 1: standard
+    encs = face_recognition.face_encodings(img)
+    if encs:
+        return encs
+
+    # Stage 2: upsampled HOG for smaller/distant faces
+    locs = face_recognition.face_locations(img, number_of_times_to_upsample=2, model="hog")
+    if locs:
+        encs = face_recognition.face_encodings(img, locs)
+        if encs:
+            return encs
+
+    # Stage 3: CLAHE contrast enhancement for uneven/dim lighting
+    bgr = None
+    try:
+        bgr = cv2.imread(str(img_path))
+        if bgr is not None:
+            lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l)
+            rgb_clahe = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2RGB)
+            locs_clahe = face_recognition.face_locations(rgb_clahe, number_of_times_to_upsample=1, model="hog")
+            if locs_clahe:
+                encs = face_recognition.face_encodings(rgb_clahe, locs_clahe)
+                if encs:
+                    return encs
+    except Exception:
+        pass
+
+    # Stage 4: OpenCV Haar cascade fallback
+    try:
+        if bgr is None:
+            bgr = cv2.imread(str(img_path))
+        if bgr is not None:
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            cascade = get_haar_cascade()
+            boxes = cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(30, 30))
+            if len(boxes) > 0:
+                # Select the largest face box (student portrait)
+                boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)
+                haar_locs = [(int(y), int(x + w), int(y + h), int(x)) for (x, y, w, h) in boxes[:1]]
+                encs = face_recognition.face_encodings(img, haar_locs)
+                if encs:
+                    return encs
+    except Exception:
+        pass
+
+    return []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Encoding helpers
 # ══════════════════════════════════════════════════════════════════════════════
 class EncodingManager:
@@ -184,11 +315,10 @@ class EncodingManager:
     def _encode_folder(folder: Path, sid: str) -> list:
         results = []
         image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-        for img_path in folder.iterdir():
+        for img_path in sorted(folder.iterdir()):
             if img_path.suffix.lower() not in image_extensions:
                 continue
-            img = face_recognition.load_image_file(str(img_path))
-            encs = face_recognition.face_encodings(img)
+            encs = extract_face_encodings(img_path)
             if encs:
                 results.append(encs[0])
                 log.debug("encoded %s for student %s", img_path.name, sid)
@@ -207,26 +337,34 @@ class AttendanceSystem:
     Parameters
     ----------
     tolerance : float
-        Face-match distance threshold (lower = stricter). Default 0.5.
+        Face-match distance threshold (lower = stricter). Default 0.50.
     scale_factor : float
-        Resize frame before recognition for speed (0.25 – 1.0). Default 0.25.
+        Resize frame before recognition for speed (0.25 – 1.0). Default 0.50.
     cooldown_seconds : int
         Min seconds between successive marking for the same student. Default 5.
     model : str
         face_recognition detection model: 'hog' (CPU) or 'cnn' (GPU). Default 'hog'.
+    upsample : int
+        Number of times to upsample image for detecting smaller/distant faces. Default 1.
+    use_haar : bool
+        Enable OpenCV Haar Cascade complement to capture angled/distant faces. Default True.
     """
 
     def __init__(
         self,
-        tolerance: float        = 0.45,
-        scale_factor: float     = 0.25,
+        tolerance: float        = 0.50,
+        scale_factor: float     = 0.50,
         cooldown_seconds: int   = 5,
         model: str              = "hog",
+        upsample: int           = 1,
+        use_haar: bool          = True,
     ):
         self.tolerance       = tolerance
         self.scale_factor    = scale_factor
         self.cooldown        = cooldown_seconds
         self.model           = model
+        self.upsample        = upsample
+        self.use_haar        = use_haar
 
         self.db              = AttendanceDB()
         enc_mgr              = EncodingManager()
@@ -291,8 +429,8 @@ class AttendanceSystem:
         h, w = frame.shape[:2]
         log.info("Image size: %d × %d px", w, h)
 
-        # Run recognition on the single frame (no scale-skip in image mode)
-        faces = self._process_frame(frame)
+        # Run recognition on full frame for static images to capture distant faces
+        faces = self._process_frame(frame, is_static_image=True)
         self._draw_ui(frame, time.time(), faces)
 
         # Print & export results immediately
@@ -335,6 +473,7 @@ class AttendanceSystem:
 
         frame_idx = 0
         fps_time  = time.time()
+        last_faces = []
 
         while True:
             ret, frame = cap.read()
@@ -345,12 +484,11 @@ class AttendanceSystem:
             frame_idx += 1
 
             # ── Process every other frame for speed ───────────────────────────
-            faces = []
             if frame_idx % 2 == 0:
-                faces = self._process_frame(frame)
+                last_faces = self._process_frame(frame)
 
-            # ── Overlay UI ───────────────────────────────────────────────────
-            self._draw_ui(frame, fps_time, faces)
+            # ── Overlay UI (persist last faces to avoid flicker) ──────────────
+            self._draw_ui(frame, fps_time, last_faces)
             fps_time = time.time()
 
             cv2.imshow(window_title, frame)
@@ -370,21 +508,59 @@ class AttendanceSystem:
         self.db.export_csv()
 
     # ── frame-level logic ─────────────────────────────────────────────────────
-    def _process_frame(self, frame: np.ndarray):
+    def _process_frame(self, frame: np.ndarray, is_static_image: bool = False):
         """Detect all faces in frame, match against known encodings, mark attendance.
 
         Returns a list of face tuples: (top, right, bottom, left, name, sid, confidence)
         """
-        small = cv2.resize(frame, (0, 0), fx=self.scale_factor, fy=self.scale_factor)
-        rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+        # Static image mode always uses full resolution (scale=1.0) to capture all students
+        eff_scale = 1.0 if is_static_image else self.scale_factor
+        if eff_scale != 1.0:
+            small = cv2.resize(frame, (0, 0), fx=eff_scale, fy=eff_scale)
+        else:
+            small = frame
 
-        face_locations = face_recognition.face_locations(rgb, model=self.model)
-        face_encodings = face_recognition.face_encodings(rgb, face_locations)
+        rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+
+        face_locations = find_all_face_locations(
+            rgb_img=rgb,
+            model=self.model,
+            upsample=self.upsample,
+            use_haar=self.use_haar,
+            bgr_img=small,
+        )
+
+        # Dynamic fallback: if downscaled frame missed faces, retry on full frame
+        if len(face_locations) == 0 and eff_scale < 1.0:
+            rgb_full = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            face_locations = find_all_face_locations(
+                rgb_img=rgb_full,
+                model=self.model,
+                upsample=self.upsample,
+                use_haar=self.use_haar,
+                bgr_img=frame,
+            )
+            rgb = rgb_full
+            eff_scale = 1.0
+
+        if not face_locations:
+            return []
+
+        # Extract encodings
+        raw_encodings = face_recognition.face_encodings(rgb, face_locations)
+        if len(raw_encodings) == len(face_locations):
+            pairs = list(zip(raw_encodings, face_locations))
+        else:
+            pairs = []
+            for loc in face_locations:
+                enc = face_recognition.face_encodings(rgb, [loc])
+                if enc:
+                    pairs.append((enc[0], loc))
 
         results = []
-        inv = 1.0 / self.scale_factor
+        inv = 1.0 / eff_scale
 
-        for enc, loc in zip(face_encodings, face_locations):
+        for enc, loc in pairs:
             sid, name, confidence = self._match(enc)
             self._maybe_mark(sid)
 
@@ -446,7 +622,7 @@ class AttendanceSystem:
         mode_lbl = "IMAGE MODE" if fps > 500 else f"FPS {fps:.1f}"
         cv2.putText(frame, f"{mode_lbl}  |  {now_str}", (10, 26),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
-        cv2.putText(frame, f"Marked today: {len(self.session_marked)}", (10, 50),
+        cv2.putText(frame, f"Marked today: {len(self.session_marked)}  |  Detected: {len(faces)}", (10, 50),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 1)
         cv2.putText(frame, "Q=Quit  R=Report  E=Export", (10, frame.shape[0] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
@@ -472,10 +648,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Face Recognition Attendance System")
     parser.add_argument("--source",    default=0,     help="Webcam index or video file path")
-    parser.add_argument("--tolerance", type=float, default=0.5,  help="Match tolerance (0–1)")
-    parser.add_argument("--scale",     type=float, default=0.25, help="Frame scale for speed")
+    parser.add_argument("--tolerance", type=float, default=0.50, help="Match tolerance (0–1, lower = stricter)")
+    parser.add_argument("--scale",     type=float, default=0.50, help="Frame scale for speed (0.25 to 1.0)")
+    parser.add_argument("--upsample",  type=int,   default=1,    help="Face detection upsample level (1 or 2)")
     parser.add_argument("--model",     default="hog", choices=["hog", "cnn"],
                         help="Detection model: hog (CPU) or cnn (GPU/dlib)")
+    parser.add_argument("--no-haar",   action="store_true",
+                        help="Disable OpenCV Haar cascade hybrid face detector")
     parser.add_argument("--rebuild",   action="store_true", help="Force rebuild face encodings")
     args = parser.parse_args()
 
@@ -489,5 +668,7 @@ if __name__ == "__main__":
         tolerance     = args.tolerance,
         scale_factor  = args.scale,
         model         = args.model,
+        upsample      = args.upsample,
+        use_haar      = not args.no_haar,
     )
     system.run(source=source)

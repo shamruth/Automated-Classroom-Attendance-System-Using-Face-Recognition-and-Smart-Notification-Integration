@@ -26,7 +26,7 @@ const response = await fetch("http://127.0.0.1:8000/attendance/process", {
 const result = await response.json();
 ```
 
-Optional multipart fields are `tolerance`, `scale`, and `model` (`hog` or `cnn`). The response includes recognized faces, today's attendance rows, a present/total summary, and the generated CSV filename.
+Optional multipart fields are `tolerance`, `scale`, and `model` (`hog` or `cnn`). The response includes recognized faces, today's attendance rows, a present/total summary, the generated CSV filename, and `result_image`, a base64-encoded JPEG data URL containing the recognition overlays.
 
 ## Reports
 

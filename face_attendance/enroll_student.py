@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from face_attendance.face_attendance import (
     AttendanceDB, EncodingManager,
     STUDENTS_DIR, log,
+    find_all_face_locations, extract_face_encodings,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -56,9 +57,9 @@ def capture_from_webcam(student_id: str, name: str, count: int = 5) -> list[Path
         if not ret:
             break
 
-        # Live preview with guidance
+        # Live preview with hybrid guidance to reliably capture faces
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        locs = face_recognition.face_locations(rgb, model="hog")
+        locs = find_all_face_locations(rgb, model="hog", upsample=1, use_haar=True, bgr_img=frame)
 
         colour = (0, 220, 0) if locs else (0, 0, 220)
         status = f"Face detected  [{idx}/{count} saved]" if locs else "No face detected — adjust position"
@@ -108,8 +109,7 @@ def copy_images(student_id: str, image_paths: list[str]) -> list[Path]:
 def verify_faces(image_paths: list[Path]) -> int:
     good = 0
     for p in image_paths:
-        img  = face_recognition.load_image_file(str(p))
-        encs = face_recognition.face_encodings(img)
+        encs = extract_face_encodings(p)
         if encs:
             good += 1
         else:

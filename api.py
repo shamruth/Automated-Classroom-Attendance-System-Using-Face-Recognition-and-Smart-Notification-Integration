@@ -4,6 +4,7 @@ Run with:
     uvicorn api:app --reload
 """
 
+import base64
 import os
 from datetime import date
 from pathlib import Path
@@ -49,14 +50,56 @@ def _summary(frame) -> dict:
     }
 
 
-def _system(tolerance: float, scale: float, model: str) -> AttendanceSystem:
+def _annotated_image(frame, faces: list[tuple]) -> str:
+    """Encode the processed frame with recognition overlays for the UI."""
+    for top, right, bottom, left, name, sid, confidence in faces:
+        color = (16, 185, 129) if sid != "unknown" else (14, 165, 233)
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 3)
+        label = f"{name} ({confidence:.1f}%)" if sid != "unknown" else "Unknown"
+        (text_width, text_height), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2
+        )
+        label_top = max(top - text_height - baseline - 8, 0)
+        cv2.rectangle(frame, (left, label_top), (left + text_width + 12, top), color, -1)
+        cv2.putText(
+            frame,
+            label,
+            (left + 6, top - 6 if top > text_height + baseline + 8 else label_top + text_height + 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not encoded:
+        raise HTTPException(status_code=500, detail="Could not encode the result image")
+    return "data:image/jpeg;base64," + base64.b64encode(buffer).decode("ascii")
+
+
+def _system(
+    tolerance: float,
+    scale: float,
+    model: str,
+    upsample: int = 1,
+    use_haar: bool = True,
+) -> AttendanceSystem:
     if not 0 < tolerance <= 1:
         raise HTTPException(status_code=400, detail="tolerance must be greater than 0 and at most 1")
     if not 0 < scale <= 1:
         raise HTTPException(status_code=400, detail="scale must be greater than 0 and at most 1")
     if model not in {"hog", "cnn"}:
         raise HTTPException(status_code=400, detail="model must be 'hog' or 'cnn'")
-    return AttendanceSystem(tolerance=tolerance, scale_factor=scale, model=model)
+    if upsample not in {0, 1, 2}:
+        raise HTTPException(status_code=400, detail="upsample must be 0, 1, or 2")
+    return AttendanceSystem(
+        tolerance=tolerance,
+        scale_factor=scale,
+        model=model,
+        upsample=upsample,
+        use_haar=use_haar,
+    )
 
 
 @app.get("/health")
@@ -67,9 +110,11 @@ def health() -> dict:
 @app.post("/attendance/process")
 async def process_attendance(
     image: UploadFile = File(...),
-    tolerance: float = Form(0.45),
-    scale: float = Form(0.25),
+    tolerance: float = Form(0.50),
+    scale: float = Form(1.0),
     model: str = Form("hog"),
+    upsample: int = Form(1),
+    use_haar: bool = Form(True),
 ) -> dict:
     """Recognize all faces in one uploaded image and mark today's attendance."""
     if image.content_type not in SUPPORTED_IMAGE_TYPES:
@@ -85,11 +130,11 @@ async def process_attendance(
     if frame is None:
         raise HTTPException(status_code=400, detail="The uploaded file is not a readable image")
 
-    system = _system(tolerance, scale, model)
+    system = _system(tolerance, scale, model, upsample=upsample, use_haar=use_haar)
     if not system.known_encodings:
         raise HTTPException(status_code=503, detail="No enrolled face encodings found")
 
-    faces = system._process_frame(frame)
+    faces = system._process_frame(frame, is_static_image=(scale == 1.0))
     db = system.db
     report = db.today_report()
     recognized = [
@@ -110,6 +155,7 @@ async def process_attendance(
         "attendance": _records(report),
         "summary": _summary(report),
         "csv_file": exported.name,
+        "result_image": _annotated_image(frame, faces),
     }
 
 

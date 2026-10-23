@@ -32,6 +32,7 @@ app.add_middleware(
 )
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+MAX_BATCH_IMAGES = 25
 SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff"}
 
 
@@ -119,6 +120,8 @@ async def process_attendance(
     """Recognize faces in one or more uploaded images and mark attendance."""
     if not image:
         raise HTTPException(status_code=400, detail="Upload at least one image")
+    if len(image) > MAX_BATCH_IMAGES:
+        raise HTTPException(status_code=413, detail=f"Upload at most {MAX_BATCH_IMAGES} images at a time")
 
     system = _system(tolerance, scale, model, upsample=upsample, use_haar=use_haar)
     if not system.known_encodings:
@@ -140,18 +143,24 @@ async def process_attendance(
             raise HTTPException(status_code=400, detail=f"The uploaded file is not a readable image: {upload.filename}")
 
         faces = system._process_frame(frame, is_static_image=(scale == 1.0))
+        image_faces = [
+            {
+                "student_id": sid,
+                "name": name,
+                "confidence": confidence,
+                "recognized": sid != "unknown",
+                "location": {"top": top, "right": right, "bottom": bottom, "left": left},
+            }
+            for top, right, bottom, left, name, sid, confidence in faces
+        ]
         results.append({
             "filename": upload.filename,
-            "faces": [
-                {
-                    "student_id": sid,
-                    "name": name,
-                    "confidence": confidence,
-                    "recognized": sid != "unknown",
-                    "location": {"top": top, "right": right, "bottom": bottom, "left": left},
-                }
-                for top, right, bottom, left, name, sid, confidence in faces
-            ],
+            "faces": image_faces,
+            "summary": {
+                "total": len(image_faces),
+                "recognized": sum(face["recognized"] for face in image_faces),
+                "unknown": sum(not face["recognized"] for face in image_faces),
+            },
             "result_image": _annotated_image(frame, faces),
         })
 

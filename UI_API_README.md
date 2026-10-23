@@ -77,9 +77,11 @@ The UI shows:
 - Today's attendance report
 - Present, total, and attendance percentage summary
 - Student attendance rows
-- Image upload and face-processing results
+- Multiple image selection with immediate loaded-photo previews
+- One annotated recognition result for every uploaded image
+- Matched student IDs and face counts for every result image
 
-Choose a classroom image and click **Process attendance**. The report updates after processing.
+Choose one or more classroom images and click **Process attendance**. The report updates with the combined student records after processing. Clicking **Refresh Report** clears the current report table and metrics before loading the latest report.
 
 ## 7. Check the API directly
 

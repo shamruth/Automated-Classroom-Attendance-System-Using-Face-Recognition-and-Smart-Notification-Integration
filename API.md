@@ -26,7 +26,7 @@ const response = await fetch("http://127.0.0.1:8000/attendance/process", {
 const result = await response.json();
 ```
 
-Optional multipart fields are `tolerance`, `scale`, and `model` (`hog` or `cnn`). The response includes today's attendance rows, a present/total summary, the generated CSV filename, and `results`, containing one item per uploaded image. Each result has its filename, recognized faces, and `result_image`, a base64-encoded JPEG data URL containing the recognition overlays.
+Optional multipart fields are `tolerance`, `scale`, and `model` (`hog` or `cnn`). Up to 25 images can be uploaded per request. The response includes today's attendance rows, a present/total summary, the generated CSV filename, and `results`, containing one item per uploaded image. Each result has its filename, recognized faces, per-photo match counts, and `result_image`, a base64-encoded JPEG data URL containing the recognition overlays.
 
 ## Reports
 

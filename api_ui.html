@@ -352,6 +352,28 @@
       white-space: nowrap;
     }
 
+    .loaded-image-panel {
+      display: none;
+      margin-top: 18px;
+    }
+
+    .loaded-image-panel.visible { display: block; }
+
+    .loaded-image-panel h3 {
+      margin: 0 0 10px;
+      color: var(--ink-muted);
+      font-size: 14px;
+    }
+
+    .loaded-image {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: contain;
+      border-radius: 6px;
+      background: #e2e8f0;
+    }
+
     .result-image {
       display: block;
       width: 100%;
@@ -450,6 +472,11 @@
           <label class="file-input-label" for="imageInput">Select or drop a photo</label>
           <input id="imageInput" type="file" multiple accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff">
           <p class="upload-hint">Select one or more classroom photos.</p>
+
+          <div id="loadedImagePanel" class="loaded-image-panel">
+            <h3>Loaded photos</h3>
+            <div id="loadedGallery" class="result-gallery"></div>
+          </div>
           
           <div class="actions">
             <button id="processButton" type="button">⚡ Process Attendance</button>
@@ -558,6 +585,7 @@
   <script>
     const API_BASE = "http://127.0.0.1:8000";
     const $ = (id) => document.getElementById(id);
+    let loadedPreviewUrls = [];
 
     // Range display sync
     $("toleranceRange").addEventListener("input", (e) => {
@@ -577,6 +605,49 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
       return data;
+    }
+
+    function escapeHTML(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;"
+      })[character]);
+    }
+
+    function clearReport() {
+      renderSummary({ present: "-", total: "-", percentage: "-" });
+      $("reportDate").textContent = "";
+      $("reportBody").innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--ink-muted);">Report cleared.</td></tr>`;
+    }
+
+    function renderLoadedPhotos(files) {
+      loadedPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+      loadedPreviewUrls = files.map((file) => URL.createObjectURL(file));
+      $("loadedGallery").innerHTML = files.map((file, index) => `
+        <div class="result-card">
+          <div class="result-card-title" title="${escapeHTML(file.name)}">${escapeHTML(file.name)}</div>
+          <img class="loaded-image" src="${loadedPreviewUrls[index]}" alt="Loaded photo ${index + 1}">
+        </div>
+      `).join("");
+      $("loadedImagePanel").classList.toggle("visible", files.length > 0);
+    }
+
+    function renderResults(results) {
+      $("resultGallery").innerHTML = results.map((result, index) => {
+        const summary = result.summary || { total: result.faces?.length || 0, recognized: 0, unknown: 0 };
+        const filename = result.filename || `Image ${index + 1}`;
+        const faces = result.faces || [];
+        const matches = faces.length
+          ? faces.map((face) => `${escapeHTML(face.name)}${face.recognized ? ` (${escapeHTML(face.student_id)})` : " (Unknown)"}`).join(", ")
+          : "No faces detected";
+        return `
+          <div class="result-card">
+            <div class="result-card-title" title="${escapeHTML(filename)}">${escapeHTML(filename)}</div>
+            <img class="result-image" src="${result.result_image}" alt="Recognition result for ${escapeHTML(filename)}" loading="lazy">
+            <div class="face-meta">${summary.total} face${summary.total === 1 ? "" : "s"} | ${summary.recognized} matched | ${summary.unknown} unknown</div>
+            <div class="face-meta">${matches}</div>
+          </div>`;
+      }).join("");
+      $("resultImagePanel").classList.toggle("visible", results.length > 0);
     }
 
     function renderSummary(summary) {
@@ -607,6 +678,7 @@
     async function refreshReport() {
       const button = $("refreshButton");
       button.disabled = true;
+      clearReport();
       showMessage("Refreshing attendance report...");
       try {
         const data = await request(`/attendance/report?_=${Date.now()}`);
@@ -619,6 +691,14 @@
         button.disabled = false;
       }
     }
+
+    $("imageInput").addEventListener("change", () => {
+      const files = Array.from($("imageInput").files);
+      renderLoadedPhotos(files);
+      if (files.length) {
+        showMessage(`${files.length} photo${files.length === 1 ? "" : "s"} loaded. Ready to process.`);
+      }
+    });
 
     async function checkHealth() {
       try {
@@ -659,13 +739,7 @@
 
         showMessage(`Processed ${files.length} photo${files.length === 1 ? "" : "s"}: ${faces.length} faces (${recognized.length} recognized, ${unknown.length} unknown). CSV: ${data.csv_file}`, "success");
 
-        $("resultGallery").innerHTML = results.map((result, index) => `
-          <div class="result-card">
-            <div class="result-card-title" title="${result.filename || `Image ${index + 1}`}" >${result.filename || `Image ${index + 1}`}</div>
-            <img class="result-image" src="${result.result_image}" alt="Recognition result for ${result.filename || `image ${index + 1}`}" loading="lazy">
-          </div>
-        `).join("");
-        $("resultImagePanel").classList.add("visible");
+        renderResults(results);
 
         // Show stats and list
         $("facesContainer").style.display = "block";

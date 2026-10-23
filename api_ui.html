@@ -144,6 +144,12 @@
       font-size: 14px;
     }
 
+    .upload-hint {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
     /* Tuning Controls */
     .controls-panel {
       margin: 18px 0;
@@ -322,6 +328,30 @@
       color: var(--ink-muted);
     }
 
+    .result-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .result-card {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .result-card-title {
+      overflow: hidden;
+      margin-bottom: 8px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .result-image {
       display: block;
       width: 100%;
@@ -418,7 +448,8 @@
 
         <div class="upload-box">
           <label class="file-input-label" for="imageInput">Select or drop a photo</label>
-          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff">
+          <input id="imageInput" type="file" multiple accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff">
+          <p class="upload-hint">Select one or more classroom photos.</p>
           
           <div class="actions">
             <button id="processButton" type="button">⚡ Process Attendance</button>
@@ -471,8 +502,8 @@
         <p id="message" class="message">Select a classroom image to begin recognition.</p>
 
         <div id="resultImagePanel" class="result-image-panel">
-          <h3>Recognition result</h3>
-          <img id="resultImage" class="result-image" alt="Processed classroom image with face recognition results">
+          <h3>Recognition results</h3>
+          <div id="resultGallery" class="result-gallery"></div>
         </div>
         
         <!-- Detected Faces Live Results -->
@@ -603,14 +634,14 @@
     }
 
     $("processButton").addEventListener("click", async () => {
-      const file = $("imageInput").files[0];
-      if (!file) { 
+      const files = Array.from($("imageInput").files);
+      if (!files.length) {
         showMessage("Please choose an image first.", "error"); 
         return; 
       }
 
       const form = new FormData();
-      form.append("image", file);
+      files.forEach((file) => form.append("image", file));
       form.append("scale", $("scaleSelect").value);
       form.append("use_haar", $("detectorSelect").value === "hybrid" ? "true" : "false");
       form.append("upsample", $("upsampleSelect").value);
@@ -621,16 +652,20 @@
 
       try {
         const data = await request("/attendance/process", { method: "POST", body: form });
-        const faces = data.faces || [];
+        const results = data.results || [{ filename: data.filename, faces: data.faces || [], result_image: data.result_image }];
+        const faces = results.flatMap((result) => result.faces || []);
         const recognized = faces.filter(f => f.recognized);
         const unknown = faces.filter(f => !f.recognized);
 
-        showMessage(`Successfully processed ${faces.length} faces (${recognized.length} recognized, ${unknown.length} unknown). CSV: ${data.csv_file}`, "success");
+        showMessage(`Processed ${files.length} photo${files.length === 1 ? "" : "s"}: ${faces.length} faces (${recognized.length} recognized, ${unknown.length} unknown). CSV: ${data.csv_file}`, "success");
 
-        if (data.result_image) {
-          $("resultImage").src = data.result_image;
-          $("resultImagePanel").classList.add("visible");
-        }
+        $("resultGallery").innerHTML = results.map((result, index) => `
+          <div class="result-card">
+            <div class="result-card-title" title="${result.filename || `Image ${index + 1}`}" >${result.filename || `Image ${index + 1}`}</div>
+            <img class="result-image" src="${result.result_image}" alt="Recognition result for ${result.filename || `image ${index + 1}`}" loading="lazy">
+          </div>
+        `).join("");
+        $("resultImagePanel").classList.add("visible");
 
         // Show stats and list
         $("facesContainer").style.display = "block";

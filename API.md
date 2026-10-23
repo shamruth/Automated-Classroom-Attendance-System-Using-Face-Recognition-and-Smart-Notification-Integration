@@ -13,11 +13,11 @@ The server listens on `http://127.0.0.1:8000` by default. The frontend may use `
 
 ## Process an uploaded picture
 
-`POST /attendance/process` accepts a multipart form upload named `image`.
+`POST /attendance/process` accepts one or more multipart form uploads named `image`.
 
 ```javascript
 const form = new FormData();
-form.append("image", fileFromInput);
+files.forEach((file) => form.append("image", file));
 
 const response = await fetch("http://127.0.0.1:8000/attendance/process", {
   method: "POST",
@@ -26,7 +26,7 @@ const response = await fetch("http://127.0.0.1:8000/attendance/process", {
 const result = await response.json();
 ```
 
-Optional multipart fields are `tolerance`, `scale`, and `model` (`hog` or `cnn`). The response includes recognized faces, today's attendance rows, a present/total summary, the generated CSV filename, and `result_image`, a base64-encoded JPEG data URL containing the recognition overlays.
+Optional multipart fields are `tolerance`, `scale`, and `model` (`hog` or `cnn`). The response includes today's attendance rows, a present/total summary, the generated CSV filename, and `results`, containing one item per uploaded image. Each result has its filename, recognized faces, and `result_image`, a base64-encoded JPEG data URL containing the recognition overlays.
 
 ## Reports
 

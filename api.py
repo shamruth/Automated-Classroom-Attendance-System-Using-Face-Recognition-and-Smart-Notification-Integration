@@ -109,53 +109,65 @@ def health() -> dict:
 
 @app.post("/attendance/process")
 async def process_attendance(
-    image: UploadFile = File(...),
+    image: list[UploadFile] = File(...),
     tolerance: float = Form(0.50),
     scale: float = Form(1.0),
     model: str = Form("hog"),
     upsample: int = Form(1),
     use_haar: bool = Form(True),
 ) -> dict:
-    """Recognize all faces in one uploaded image and mark today's attendance."""
-    if image.content_type not in SUPPORTED_IMAGE_TYPES:
-        raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, WEBP, BMP, or TIFF image")
-
-    contents = await image.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded image is empty")
-    if len(contents) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Image must be 15 MB or smaller")
-
-    frame = cv2.imdecode(np.frombuffer(contents, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(status_code=400, detail="The uploaded file is not a readable image")
+    """Recognize faces in one or more uploaded images and mark attendance."""
+    if not image:
+        raise HTTPException(status_code=400, detail="Upload at least one image")
 
     system = _system(tolerance, scale, model, upsample=upsample, use_haar=use_haar)
     if not system.known_encodings:
         raise HTTPException(status_code=503, detail="No enrolled face encodings found")
 
-    faces = system._process_frame(frame, is_static_image=(scale == 1.0))
+    results = []
+    for upload in image:
+        if upload.content_type not in SUPPORTED_IMAGE_TYPES:
+            raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, WEBP, BMP, or TIFF image")
+
+        contents = await upload.read()
+        if not contents:
+            raise HTTPException(status_code=400, detail=f"Uploaded image is empty: {upload.filename}")
+        if len(contents) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"Image must be 15 MB or smaller: {upload.filename}")
+
+        frame = cv2.imdecode(np.frombuffer(contents, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            raise HTTPException(status_code=400, detail=f"The uploaded file is not a readable image: {upload.filename}")
+
+        faces = system._process_frame(frame, is_static_image=(scale == 1.0))
+        results.append({
+            "filename": upload.filename,
+            "faces": [
+                {
+                    "student_id": sid,
+                    "name": name,
+                    "confidence": confidence,
+                    "recognized": sid != "unknown",
+                    "location": {"top": top, "right": right, "bottom": bottom, "left": left},
+                }
+                for top, right, bottom, left, name, sid, confidence in faces
+            ],
+            "result_image": _annotated_image(frame, faces),
+        })
+
     db = system.db
     report = db.today_report()
-    recognized = [
-        {
-            "student_id": sid,
-            "name": name,
-            "confidence": confidence,
-            "recognized": sid != "unknown",
-            "location": {"top": top, "right": right, "bottom": bottom, "left": left},
-        }
-        for top, right, bottom, left, name, sid, confidence in faces
-    ]
     exported = db.export_csv()
+    first_result = results[0]
     return {
         "date": date.today().isoformat(),
-        "filename": image.filename,
-        "faces": recognized,
+        "filename": first_result["filename"],
+        "faces": first_result["faces"],
+        "result_image": first_result["result_image"],
+        "results": results,
         "attendance": _records(report),
         "summary": _summary(report),
         "csv_file": exported.name,
-        "result_image": _annotated_image(frame, faces),
     }
 
 

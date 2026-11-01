@@ -3,7 +3,9 @@
 ## Setup (Python 3.10/3.11)
     python -m venv venv && venv\Scripts\activate
     pip install -r requirements.txt
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
+## Running Code   
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+## UI ctrl+click
 Open http://localhost:8000  (phones on same Wi-Fi: http://<pc-ip>:8000; camera needs https or localhost, otherwise use Upload)
 
 ## Data

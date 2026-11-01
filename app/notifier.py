@@ -49,8 +49,11 @@ def deliver(to, subject, text, html=None, attachments=None, tag="mail"):
         if html: m.add_alternative(html, subtype="html")
         for fn, data in attachments or []: m.add_attachment(data, maintype="image", subtype="jpeg", filename=fn)
         if prov == "smtp":
-            with smtplib.SMTP(os.getenv("SMTP_HOST"), int(os.getenv("SMTP_PORT", 587)), timeout=20) as s:
-                s.starttls(context=ssl.create_default_context())
+            port = int(os.getenv("SMTP_PORT", 587))
+            smtp_class = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+            with smtp_class(os.getenv("SMTP_HOST"), port, timeout=20) as s:
+                if port != 465:
+                    s.starttls(context=ssl.create_default_context())
                 s.login(os.getenv("SMTP_USER"), os.getenv("SMTP_PASSWORD")); s.send_message(m)
             log.info(f"[{tag}] SMTP ok -> {to}"); return "sent", to
         (OUTBOX / f"{tag}_{to}.eml").write_bytes(bytes(m))

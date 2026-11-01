@@ -10,8 +10,7 @@ env/
 # Secrets and personal data - never commit
 .env
 students/
-contacts.csv
-staff.json
+
 data/
 logs/
 

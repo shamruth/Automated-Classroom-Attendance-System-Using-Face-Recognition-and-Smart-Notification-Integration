@@ -1,0 +1,8 @@
+{
+  "class_advisor": {"name": "Class Advisor Name", "email": "suriyag240@gmail.com"},
+  "hod": {"name": "HOD Name", "email": "shamruth2822006@gmail.com"},
+  "subjects": {
+    "Data Structures": {"name": "Staff Name", "email": "staff.ds@example.com"},
+    "Operating Systems": {"name": "Staff Name", "email": "staff.os@example.com"}
+  }
+}

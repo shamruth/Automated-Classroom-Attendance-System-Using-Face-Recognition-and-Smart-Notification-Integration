@@ -1,32 +1,25 @@
-# Virtual environments
+# Python
+__pycache__/
+*.py[cod]
 venv/
 .venv/
+env/
+*.egg-info/
+.pytest_cache/
 
-# Python cache
-__pycache__/
-*.pyc
+# Secrets and personal data - never commit
+.env
+students/
+contacts.csv
+staff.json
+data/
+logs/
 
-# Logs
-*.log
+# Models downloaded by InsightFace
+.insightface/
 
-# Database
-attendance.db
-
-# Generated face encodings
-encodings.json
-
-# Reports and evaluation outputs
-reports/
-eval_results/
-eval_results_row1/
-
-# OS files
+# OS / IDE
 .DS_Store
 Thumbs.db
-
-# IDE files
 .vscode/
 .idea/
-
-# Environment variables
-.env

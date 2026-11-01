@@ -1,0 +1,30 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Attendance report</title><link rel="stylesheet" href="style.css"></head><body>
+<main><h1 id="title">Attendance report</h1><p class="sub" id="meta"></p>
+<div class="stats" id="stats"></div>
+<div class="row" style="margin:0 0 16px"><a class="btn primary" id="annLink">View detected faces</a>
+<button id="notifyBtn">Email absentees</button><button id="resendBtn">Resend all</button><button id="staffBtn">Email staff</button><button id="staffResendBtn">Resend to staff</button><button id="csvBtn">Download CSV</button></div>
+<div class="grid two"><section class="card"><h2>Present</h2><div class="scroll" id="present"></div></section>
+<section class="card"><h2>Absent</h2><div class="scroll" id="absent"></div></section></div>
+<section class="card" style="margin-top:16px"><h2>Staff notifications</h2><div class="scroll" id="staff"></div></section></main>
+<script src="common.js"></script><script>
+nav("rep");let R;const id=qid();
+const badge=n=>!n?'<span class="tag warn">not sent</span>':n.status=="failed"||n.status=="no_contact"?`<span class="tag bad" title="${esc(n.detail)}">${n.status.replace("_"," ")}</span>`:`<span class="tag ok" title="${esc(n.detail)}">${n.status=="dry_run"?"saved (test)":"sent"}</span>`;
+function draw(){const s=R.summary;
+ $("#title").textContent=R.subject;$("#meta").textContent=`${R.date}, ${R.time}${R.period?" - "+R.period:""} - processed in ${R.processing_sec}s`;
+ $("#stats").innerHTML=`<div class="stat"><strong>${s.total}</strong><span>Enrolled</span></div><div class="stat ok"><strong>${s.present}</strong><span>Present</span></div><div class="stat bad"><strong>${s.absent}</strong><span>Absent</span></div><div class="stat"><strong>${s.unknown_faces}</strong><span>Unrecognised faces</span></div>`;
+ $("#present").innerHTML=R.present.length?`<table><tr><th>Roll no.</th><th>Name</th><th></th></tr>${R.present.map(p=>`<tr><td>${p.roll}</td><td>${esc(p.name)}</td><td><button class="link" data-r="${p.roll}" data-p="0">Mark absent</button></td></tr>`).join("")}</table>`:"Nobody was recognised.";
+ $("#absent").innerHTML=R.absent.length?`<table><tr><th>Roll no.</th><th>Name</th><th>Email</th><th></th></tr>${R.absent.map(p=>`<tr><td>${p.roll}</td><td>${esc(p.name)}</td><td>${badge(R.notifications[p.roll])}</td><td><button class="link" data-r="${p.roll}" data-p="1">Mark present</button> <button class="link" data-s="${p.roll}">Resend</button></td></tr>`).join("")}</table>`:"Everyone is present.";
+ const SN=R.staff_notifications||{},L={class_advisor:"Class advisor",hod:"HOD",subject_staff:"Subject staff"};
+ $("#staff").innerHTML=Object.keys(SN).length?`<table><tr><th>Role</th><th>Name</th><th>Email</th><th>Status</th></tr>${Object.entries(SN).map(([k,v])=>`<tr><td>${L[k]||k}</td><td>${esc(v.name)}</td><td>${esc(v.email)}</td><td>${badge(v)}</td></tr>`).join("")}</table>`:"Not sent yet. Use Email staff to notify the class advisor, HOD and subject staff.";
+ $("#annLink").href="annotated.html?id="+id}
+async function load(){try{R=await api("/sessions/"+id);draw()}catch(e){$("#meta").innerHTML=`<span class="err">${esc(e.message)}. Capture a new photo.</span>`}}
+document.addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;
+ try{if(b.dataset.r){R=await api(`/sessions/${id}/override`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({roll:b.dataset.r,present:b.dataset.p=="1"})});draw()}
+ else if(b.id=="staffBtn"||b.id=="staffResendBtn"){b.disabled=true;const r=await api(`/sessions/${id}/${b.id=="staffBtn"?"notify-staff":"resend-staff"}`,{method:"POST"});R.staff_notifications=r.staff_notifications;draw();toast("Staff notifications processed");b.disabled=false}
+ else if(b.dataset.s||b.id=="notifyBtn"||b.id=="resendBtn"){b.disabled=true;const one=b.dataset.s,path=b.id=="notifyBtn"?"notify":"resend";
+  const r=await api(`/sessions/${id}/${path}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rolls:one?[one]:null})});R.notifications=r.notifications;draw();toast(r.sent.length?`${r.sent.length} notification(s) processed`:"Nothing new to send");b.disabled=false}}
+ catch(err){toast(err.message);b.disabled=false}});
+$("#csvBtn").onclick=()=>{const rows=["roll,name,status",...R.present.map(p=>`${p.roll},${p.name},Present`),...R.absent.map(p=>`${p.roll},${p.name},Absent`)];
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.join("\n")],{type:"text/csv"}));a.download=`attendance_${id}.csv`;a.click()};
+load();</script></body></html>

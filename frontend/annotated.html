@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Detected faces</title><link rel="stylesheet" href="style.css"></head><body>
+<main><h1>Detected faces</h1><p class="sub" id="meta">Green boxes are recognised students; red boxes are faces that matched nobody.</p>
+<div class="grid two"><section class="card"><div class="photo" id="photo"></div></section>
+<section class="card"><h2>Faces in this photo</h2><div class="scroll" id="list"></div>
+<div class="row"><a class="btn" id="back">Back to report</a></div></section></div></main>
+<script src="common.js"></script><script>
+nav("ann");const id=qid();$("#back").href="report.html?id="+id;
+api("/sessions/"+id).then(R=>{
+ $("#photo").innerHTML=`<img src="/api/sessions/${id}/image/original" alt="Class photo">`+R.faces.map((f,i)=>{const [x,y,w,h]=f.box_pct;
+  return `<div class="box ${f.roll?"":"unk"}" data-i="${i}" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%"><span>${f.roll||"Unknown"}</span></div>`}).join("");
+ const fs=[...R.faces.keys()].sort((a,b)=>(R.faces[a].roll||"~").localeCompare(R.faces[b].roll||"~"));
+ $("#list").innerHTML=`<table><tr><th>Roll no.</th><th>Name</th><th>Match</th></tr>${fs.map(i=>{const f=R.faces[i];return `<tr data-i="${i}"><td>${f.roll||"-"}</td><td>${esc(f.name)}</td><td>${Math.round(f.score*100)}%</td></tr>`}).join("")}</table>`;
+ const hl=(i,on)=>document.querySelector(`.box[data-i="${i}"]`)?.classList.toggle("hl",on);
+ document.querySelectorAll("#list tr[data-i]").forEach(t=>{t.onmouseenter=()=>hl(t.dataset.i,1);t.onmouseleave=()=>hl(t.dataset.i,0)})
+}).catch(e=>$("#meta").innerHTML=`<span class="err">${esc(e.message)}</span>`);
+</script></body></html>

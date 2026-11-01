@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Capture class photo</title><link rel="stylesheet" href="style.css"></head><body>
+<main>
+<h1>Take attendance</h1><p class="sub">Photograph the whole class from the front, then submit it. Everyone should face the camera.</p>
+<div class="grid two">
+ <section class="card">
+  <div class="stage" id="stage"><span id="hint">Camera is off</span><video id="video" autoplay playsinline muted hidden></video><img id="preview" alt="Captured class photo" hidden></div>
+  <div class="row">
+   <button id="camBtn">Start camera</button><button id="snapBtn" hidden>Take photo</button>
+   <label class="btn" style="margin:0">Upload a photo<input id="file" type="file" accept="image/*" hidden></label>
+   <button id="retakeBtn" hidden>Retake</button>
+  </div>
+  <div class="row" style="margin-top:18px"><div style="flex:1;min-width:200px"><label for="subject">Subject</label><input type="text" id="subject" value="Data Structures"></div>
+   <div style="flex:1;min-width:140px"><label for="period">Period (optional)</label><input type="text" id="period" placeholder="e.g. 3rd hour"></div></div>
+  <div class="row"><button class="primary" id="submit" disabled>Mark attendance</button></div>
+  <ul class="steps" id="steps" hidden><li>Uploading photo</li><li>Detecting faces</li><li>Matching students</li><li>Preparing report</li></ul>
+  <p class="err" id="err" role="alert"></p>
+ </section>
+ <aside class="card"><h2>Recent sessions</h2><div id="recent" class="scroll">Loading...</div></aside>
+</div></main>
+<script src="common.js"></script><script>
+nav("cap");let blob=null,stream=null;
+const v=$("#video"),pv=$("#preview");
+function setBlob(b){blob=b;pv.src=URL.createObjectURL(b);pv.hidden=false;v.hidden=true;$("#hint").hidden=true;$("#snapBtn").hidden=true;$("#retakeBtn").hidden=false;$("#submit").disabled=false;stopCam()}
+function stopCam(){stream&&stream.getTracks().forEach(t=>t.stop());stream=null}
+$("#camBtn").onclick=async()=>{try{stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080},facingMode:"environment"}});v.srcObject=stream;v.hidden=false;pv.hidden=true;$("#hint").hidden=true;$("#snapBtn").hidden=false;$("#err").textContent=""}catch(e){$("#err").textContent="Camera unavailable. Allow camera access or upload a photo instead."}};
+$("#snapBtn").onclick=()=>{const c=document.createElement("canvas");c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);c.toBlob(setBlob,"image/jpeg",.92)};
+$("#file").onchange=e=>e.target.files[0]&&setBlob(e.target.files[0]);
+$("#retakeBtn").onclick=()=>{blob=null;pv.hidden=true;$("#retakeBtn").hidden=true;$("#submit").disabled=true;$("#camBtn").click()};
+$("#submit").onclick=async()=>{
+ $("#err").textContent="";$("#submit").disabled=true;const st=[...$("#steps").children];$("#steps").hidden=false;let i=0;
+ const tick=()=>st.forEach((li,k)=>li.className=k<i?"done":k==i?"now":"");tick();const timer=setInterval(()=>{if(i<st.length-1){i++;tick()}},1600);
+ const fd=new FormData();fd.append("file",blob,"class.jpg");fd.append("subject",$("#subject").value||"General");fd.append("period",$("#period").value);
+ try{const r=await api("/attendance",{method:"POST",body:fd});clearInterval(timer);i=4;tick();location.href="report.html?id="+r.id}
+ catch(e){clearInterval(timer);$("#err").textContent="Could not process photo: "+e.message;$("#submit").disabled=false}};
+api("/sessions").then(s=>{$("#recent").innerHTML=s.length?`<table><tr><th>Subject</th><th>Present</th></tr>${s.map(x=>`<tr><td><a href="report.html?id=${x.id}">${esc(x.subject)}</a><br><small>${x.date}, ${x.time}</small></td><td>${x.summary.present}/${x.summary.total}</td></tr>`).join("")}</table>`:"No sessions yet. Your first one will appear here."}).catch(()=>$("#recent").textContent="Server not reachable.");
+</script></body></html>

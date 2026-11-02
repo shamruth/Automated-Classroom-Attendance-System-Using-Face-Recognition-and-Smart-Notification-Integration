@@ -3,6 +3,8 @@
 ## Setup (Python 3.10/3.11)
     python -m venv venv && venv\Scripts\activate
     pip install -r requirements.txt
+    pip install opencv-python numpy scipy insightface python-dotenv fastapi uvicorn pydantic python-multipart dotenv
+
 ## Running Code   
     uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ## UI ctrl+click

@@ -10,7 +10,10 @@ env/
 # Secrets and personal data - never commit
 .env
 students/
-
+test_images/
+students.rar
+test_images.rar
+23CSR078/
 data/
 logs/
 
